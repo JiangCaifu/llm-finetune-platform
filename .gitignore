@@ -1,0 +1,54 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+env/
+ENV/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# 环境变量与密钥
+.env
+.env.local
+*.key
+
+# 模型权重与数据（体积大，不入仓）
+outputs/
+data/tourism_dataset/
+data/*.parquet
+*.bin
+*.safetensors
+*.gguf
+*.pt
+*.pth
+
+# 前端
+frontend/node_modules/
+frontend/dist/
+frontend/build/
+frontend/.next/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# 日志
+*.log
+logs/
+
+# TensorBoard
+runs/

@@ -1,0 +1,18 @@
+# 本地环境依赖（数据生成 + 数据清洗 + 推理服务 + 前端联调）
+# 训练相关依赖（torch/transformers/peft/trl）不装本地，在 AutoDL 上单独装
+# 使用方法：uv pip install -r requirements.txt
+
+# === 数据生成 ===
+openai>=1.40.0
+
+# === 数据处理 ===
+datasets>=2.20.0
+
+# === 推理服务 ===
+fastapi>=0.110.0
+uvicorn[standard]>=0.30.0
+python-dotenv>=1.0.0
+pydantic>=2.7.0
+
+# === 开发工具 ===
+ipykernel>=6.29.0

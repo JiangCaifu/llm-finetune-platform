@@ -1,0 +1,24 @@
+# AutoDL GPU 环境依赖（QLoRA 微调 + 评测 + 推理）
+# 在 AutoDL 实例上执行：pip install -r requirements-gpu.txt
+# 注意：torch 通过 AutoDL 镜像自带的 CUDA 11.8 版本安装，不要用 pip 默认源
+
+# === 训练框架 ===
+transformers>=4.44.0
+peft>=0.12.0
+trl>=0.9.0
+accelerate>=0.33.0
+bitsandbytes>=0.43.0
+
+# === 数据 ===
+datasets>=2.20.0
+
+# === 评测 ===
+jieba>=0.42.1
+nltk>=3.8.1
+
+# === 监控 ===
+tensorboard>=2.17.0
+
+# === 推理 ===
+fastapi>=0.110.0
+uvicorn[standard]>=0.30.0
