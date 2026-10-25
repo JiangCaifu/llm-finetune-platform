@@ -42,6 +42,7 @@ import torch
 from transformers import (
     AutoModelForCausalLM,
     AutoTokenizer,
+    BitsAndBytesConfig,
 )
 from peft import (
     LoraConfig,
@@ -154,9 +155,18 @@ def main():
 
     # ===== 3. 加载基座模型（4bit 量化）=====
     print("\n[3/6] 加载基座模型（4bit 量化）...")
+    # 标准 QLoRA 配置：必须用 BitsAndBytesConfig 显式指定 nf4 + double_quant + compute_dtype
+    # 直接传 load_in_4bit=True 会用默认 fp4 量化且不设 compute_dtype，
+    # 反向传播时梯度会被破坏（grad_norm 全程为 0，模型完全不学习）
+    bnb_config = BitsAndBytesConfig(
+        load_in_4bit=True,
+        bnb_4bit_quant_type="nf4",            # Normalized Float 4-bit（QLoRA 论文标准）
+        bnb_4bit_compute_dtype=torch.bfloat16, # 反向传播时去量化到 bf16，与训练 dtype 一致
+        bnb_4bit_use_double_quant=True,        # 嵌套量化，进一步省显存且不掉精度
+    )
     model = AutoModelForCausalLM.from_pretrained(
         args.model,
-        load_in_4bit=True,
+        quantization_config=bnb_config,
         device_map="auto",
         torch_dtype=torch.bfloat16,  # A10 (Ampere) 原生支持 bf16
     )
@@ -200,7 +210,7 @@ def main():
         save_strategy="epoch",
         save_total_limit=3,
         bf16=True,  # A10 (Ampere) 原生支持 bf16，比 fp16 数值范围更大、训练更稳定
-        optim="paged_adamw_8bit",
+        optim="adamw_torch",  # 标准 PyTorch AdamW（A10 24GB 显存充足，无需 paged 8bit）
         report_to="tensorboard",
         load_best_model_at_end=True,
         metric_for_best_model="eval_loss",
