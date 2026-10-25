@@ -3,7 +3,7 @@ QLoRA 微调脚本（在阿里云 DSW / AutoDL GPU 实例上运行）
 ======================================================
 
 功能：
-  1. 加载 Qwen-7B-Chat 基座（4bit 量化）
+  1. 加载 Qwen2-7B-Instruct 基座（4bit 量化）
   2. 应用 LoRA 配置（rank=8, alpha=32）
   3. 加载文旅数据集（Alpaca 格式）
   4. 使用 SFTTrainer 训练
@@ -14,7 +14,7 @@ QLoRA 微调脚本（在阿里云 DSW / AutoDL GPU 实例上运行）
   2. 镜像：PyTorch 2.3 + CUDA 12.1 + Python 3.11
   3. 安装依赖：pip install -r requirements-gpu.txt
   4. 数据集已上传到 data/ 目录
-  5. Qwen-7B-Chat 模型已下载到本地
+  5. Qwen2-7B-Instruct 模型已下载到本地
 
 运行：
   cd ~/llm-finetune-platform
@@ -56,7 +56,7 @@ from trl import SFTTrainer, SFTConfig
 # ============ Qwen ChatML 模板 ============
 SYSTEM_PROMPT = "你是文旅助手，提供准确、详细的旅游信息和建议。"
 
-# Qwen-7B-Chat 的 ChatML 模板（手动构造，避免依赖 tokenizer.chat_template）
+# Qwen2-7B-Instruct 的 ChatML 模板（手动构造，避免依赖 tokenizer.chat_template）
 CHATML_TEMPLATE = (
     "<|im_start|>system\n{system}<|im_end|>\n"
     "<|im_start|>user\n{user}<|im_end|>\n"
@@ -106,89 +106,9 @@ def load_dataset_split(tokenizer, data_dir: str = "data"):
     return train_ds, val_ds
 
 
-def setup_special_tokens(tokenizer):
-    """
-    为 Qwen-7B-Chat 旧版 tokenizer 一次性补齐所有特殊 token。
-
-    背景：
-      Qwen-7B-Chat（2023 年初版）的 tokenizer_config.json 仅 174 字节，
-      未显式配置 bos/eos/pad/unk token 的字符串映射，导致这些属性全部返回 None。
-      而 trl 0.22 的 SFTTrainer 内部多处依赖：
-        1. SFTTrainer.__init__ 调 tokenizer.convert_tokens_to_ids(pad_token)  → 需要 pad_token 非 None
-        2. SFTTrainer._add_eos 调 example["text"].endswith(eos_token)          → 需要 eos_token 非 None
-      任一为 None 都会触发 'NoneType' 相关错误。
-
-    工程标准方案：
-      1. 优先从 generation_config 读 eos_token_id / pad_token_id（适配不同模型版本）
-      2. 配置缺失时用已知常量兜底（Qwen-7B-Chat 的 たくさん token id=151643）
-      3. 同步设置字符串和 id，保证两者一致
-      4. 不新增 token，不 resize embedding，避免与 LoRA 训练冲突
-    """
-    # 已通过 vocab 探查验证：id=151643 对应 Qwen-7B-Chat 的 たくさん token
-    QWEN_EOS_TOKEN_ID = 151643
-
-    # ===== 步骤 1：从 generation_config 读特殊 token id =====
-    eos_id = None
-    pad_id = None
-    try:
-        gen_config = getattr(tokenizer, "generation_config", None)
-        if gen_config is not None:
-            eos_id = getattr(gen_config, "eos_token_id", None)
-            pad_id = getattr(gen_config, "pad_token_id", None)
-    except Exception:
-        pass
-
-    # 兜底：用已知常量
-    if eos_id is None:
-        eos_id = QWEN_EOS_TOKEN_ID
-    if pad_id is None:
-        pad_id = eos_id  # Qwen-7B-Chat 中 pad 和 eos 共用同一个 id
-
-    # ===== 步骤 2：从 vocab 反查字符串 =====
-    def _id_to_str(tid):
-        try:
-            s = tokenizer.convert_ids_to_tokens(tid)
-            if s is None:
-                s = tokenizer.decode([tid])
-            return s
-        except Exception:
-            return None
-
-    eos_str = _id_to_str(eos_id) or (chr(0x3C) + "|endoftext|")
-    pad_str = _id_to_str(pad_id) or eos_str
-
-    # ===== 步骤 3：同步设置所有特殊 token（id + 字符串）=====
-    if tokenizer.bos_token is None:
-        tokenizer.bos_token_id = None  # Qwen 没有 bos
-        tokenizer.bos_token = None
-
-    if tokenizer.eos_token is None:
-        tokenizer.eos_token_id = eos_id
-        tokenizer.eos_token = eos_str
-
-    if tokenizer.pad_token is None:
-        tokenizer.pad_token_id = pad_id
-        tokenizer.pad_token = pad_str
-
-    if tokenizer.unk_token is None:
-        # Qwen-7B-Chat 没有 unk，复用 eos
-        tokenizer.unk_token_id = eos_id
-        tokenizer.unk_token = eos_str
-
-    print(f"  bos_token={tokenizer.bos_token!r}, id={tokenizer.bos_token_id}")
-    print(f"  eos_token={tokenizer.eos_token!r}, id={tokenizer.eos_token_id}")
-    print(f"  pad_token={tokenizer.pad_token!r}, id={tokenizer.pad_token_id}")
-    print(f"  unk_token={tokenizer.unk_token!r}, id={tokenizer.unk_token_id}")
-
-
-def setup_pad_token(tokenizer):
-    """兼容旧调用入口（已弃用，请用 setup_special_tokens）"""
-    setup_special_tokens(tokenizer)
-
-
 def main():
-    parser = argparse.ArgumentParser(description="QLoRA 微调 Qwen-7B-Chat 文旅模型")
-    parser.add_argument("--model", type=str, default="Qwen/Qwen-7B-Chat",
+    parser = argparse.ArgumentParser(description="QLoRA 微调 Qwen2-7B-Instruct 文旅模型")
+    parser.add_argument("--model", type=str, default="Qwen/Qwen2-7B-Instruct",
                         help="基座模型路径")
     parser.add_argument("--data_dir", type=str, default="data",
                         help="数据目录")
@@ -205,7 +125,7 @@ def main():
     args = parser.parse_args()
 
     print("=" * 60)
-    print("QLoRA 微调 Qwen-7B-Chat 文旅模型")
+    print("QLoRA 微调 Qwen2-7B-Instruct 文旅模型")
     print("=" * 60)
     print(f"基座模型: {args.model}")
     print(f"LoRA rank: {args.rank}, alpha: {args.alpha}")
@@ -220,13 +140,12 @@ def main():
     print("\n[1/6] 加载 Tokenizer...")
     tokenizer = AutoTokenizer.from_pretrained(
         args.model,
-        trust_remote_code=True,
         padding_side="right",
     )
-    # 显式设置 pad_token，避免 trl 0.22 内部传 None 报错
-    setup_pad_token(tokenizer)
+    # Qwen2-7B-Instruct 的 tokenizer 完整配置了所有特殊 token，无需手动补齐
     print(f"Tokenizer 加载完成，vocab_size = {len(tokenizer)}")
     print(f"pad_token = {tokenizer.pad_token!r}, pad_token_id = {tokenizer.pad_token_id}")
+    print(f"eos_token = {tokenizer.eos_token!r}, eos_token_id = {tokenizer.eos_token_id}")
 
     # ===== 2. 加载数据 =====
     print("\n[2/6] 加载数据集...")
@@ -239,25 +158,23 @@ def main():
         args.model,
         load_in_4bit=True,
         device_map="auto",
-        trust_remote_code=True,
-        # 用 bfloat16 加载，匹配 Qwen flash attention 的 dtype assert
-        # Qwen-7B-Chat 的 modeling_qwen.py:183 强制要求 q/k/v ∈ {fp16, bf16}
-        # 若用 fp16 + prepare_model_for_kbit_training 会导致部分层升级到 fp32，触发 assert 失败
-        torch_dtype=torch.bfloat16,
+        torch_dtype=torch.bfloat16,  # A10 (Ampere) 原生支持 bf16
     )
     model = prepare_model_for_kbit_training(model)
     print("基座模型加载完成")
 
     # ===== 4. 应用 LoRA 配置 =====
     print("\n[4/6] 应用 LoRA 配置...")
-    # Qwen-7B-Chat（2023 初版）使用 GPT 风格命名：
-    #   c_attn = 合并的 QKV 矩阵
-    #   c_proj = attention 输出投影 + MLP 输出投影
-    #   w1, w2 = MLP 上下投影（对应新版的 gate_proj/up_proj）
+    # Qwen2-7B-Instruct 使用标准 HuggingFace 命名（与 Llama/Mistral 一致）
+    #   q_proj/k_proj/v_proj/o_proj = attention 的 Q/K/V/O 投影
+    #   gate_proj/up_proj/down_proj = MLP 的三个投影
     lora_config = LoraConfig(
         r=args.rank,
         lora_alpha=args.alpha,
-        target_modules=["c_attn", "c_proj", "w1", "w2"],
+        target_modules=[
+            "q_proj", "k_proj", "v_proj", "o_proj",  # attention
+            "gate_proj", "up_proj", "down_proj",     # MLP
+        ],
         lora_dropout=0.05,
         bias="none",
         task_type=TaskType.CAUSAL_LM,
@@ -282,11 +199,7 @@ def main():
         eval_strategy="epoch",
         save_strategy="epoch",
         save_total_limit=3,
-        # 用 bf16 训练，匹配 Qwen-7B-Chat flash attention 的 dtype assert
-        # fp16 训练会让 prepare_model_for_kbit_training 升级后的层变成 fp32，
-        # 导致 q/k/v 是 fp32，触发 modeling_qwen.py:183 的 assert 失败
-        # A10 (Ampere) 原生支持 bf16，性能和 fp16 接近，但数值范围更大（更适合训练）
-        bf16=True,
+        bf16=True,  # A10 (Ampere) 原生支持 bf16，比 fp16 数值范围更大、训练更稳定
         optim="paged_adamw_8bit",
         report_to="tensorboard",
         load_best_model_at_end=True,

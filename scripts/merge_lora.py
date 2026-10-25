@@ -1,13 +1,13 @@
 """
 合并 LoRA 权重到基座模型
 ========================
-将 LoRA adapter 合并到 Qwen-7B 基座，导出完整模型权重。
+将 LoRA adapter 合并到 Qwen2-7B-Instruct 基座，导出完整模型权重。
 
 用途：
   - 推理时无需再加载 LoRA，直接加载合并后的模型
   - 部署到 vLLM 等推理引擎时必须先合并
 
-运行（在 AutoDL GPU 实例上）：
+运行（在阿里云 DSW / AutoDL GPU 实例上）：
   python scripts/merge_lora.py
   python scripts/merge_lora.py --output ./outputs/qwen-tourism-merged
 """
@@ -24,21 +24,20 @@ from peft import PeftModel
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--model", type=str, default="Qwen/Qwen-7B-Chat")
+    parser.add_argument("--model", type=str, default="Qwen/Qwen2-7B-Instruct")
     parser.add_argument("--lora_path", type=str, default="outputs/qwen-tourism-lora")
     parser.add_argument("--output", type=str, default="outputs/qwen-tourism-merged")
     parser.add_argument("--quantize", action="store_true", help="合并后量化为 4bit (GPTQ)")
     args = parser.parse_args()
 
     print(f"[1/4] 加载 Tokenizer: {args.model}")
-    tokenizer = AutoTokenizer.from_pretrained(args.model, trust_remote_code=True)
+    tokenizer = AutoTokenizer.from_pretrained(args.model)
 
     print(f"[2/4] 加载基座模型: {args.model}")
     base = AutoModelForCausalLM.from_pretrained(
         args.model,
-        torch_dtype=torch.float16,
+        torch_dtype=torch.bfloat16,
         device_map="auto",
-        trust_remote_code=True,
     )
 
     print(f"[3/4] 加载并合并 LoRA: {args.lora_path}")

@@ -3,13 +3,13 @@
 ================================
 
 功能：
-  1. 加载原始 Qwen-7B-Chat
-  2. 加载微调后的 Qwen-7B-Chat + LoRA
+  1. 加载原始 Qwen2-7B-Instruct
+  2. 加载微调后的 Qwen2-7B-Instruct + LoRA
   3. 在 70 条测试集上对比推理结果
   4. 计算准确率（关键词命中）+ 长度 + 格式合规率
   5. 输出对比报告
 
-运行（在 AutoDL GPU 实例上）：
+运行（在阿里云 DSW / AutoDL GPU 实例上）：
   python scripts/evaluate_finetuned.py
   python scripts/evaluate_finetuned.py --samples 30  # 只评30条
 """
@@ -30,7 +30,7 @@ SYSTEM_PROMPT = "你是文旅助手，提供准确、详细的旅游信息和建
 
 def load_model(model_path: str, lora_path: str = None, load_in_4bit: bool = True):
     """加载模型 + tokenizer"""
-    tokenizer = AutoTokenizer.from_pretrained(model_path, trust_remote_code=True)
+    tokenizer = AutoTokenizer.from_pretrained(model_path)
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
@@ -38,8 +38,7 @@ def load_model(model_path: str, lora_path: str = None, load_in_4bit: bool = True
         model_path,
         load_in_4bit=load_in_4bit,
         device_map="auto",
-        trust_remote_code=True,
-        torch_dtype=torch.float16,
+        torch_dtype=torch.bfloat16,  # 与训练保持一致
     )
 
     if lora_path and Path(lora_path).exists():
@@ -118,7 +117,7 @@ def extract_keywords(instruction: str, output: str) -> List[str]:
 
 def main():
     parser = argparse.ArgumentParser(description="评测微调前后模型效果")
-    parser.add_argument("--model", type=str, default="Qwen/Qwen-7B-Chat")
+    parser.add_argument("--model", type=str, default="Qwen/Qwen2-7B-Instruct")
     parser.add_argument("--lora_path", type=str, default="outputs/qwen-tourism-lora")
     parser.add_argument("--test_data", type=str, default="data/tourism_test.json")
     parser.add_argument("--output", type=str, default="data/eval_results.json")
