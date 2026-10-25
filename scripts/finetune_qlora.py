@@ -56,19 +56,20 @@ from trl import SFTTrainer, SFTConfig
 # ============ Qwen ChatML 模板 ============
 SYSTEM_PROMPT = "你是文旅助手，提供准确、详细的旅游信息和建议。"
 
+# Qwen-7B-Chat 的 ChatML 模板（手动构造，避免依赖 tokenizer.chat_template）
+CHATML_TEMPLATE = (
+    "<|im_start|>system\n{system}<|im_end|>\n"
+    "<|im_start|>user\n{user}<|im_end|>\n"
+    "<|im_start|>assistant\n{assistant}<|im_end|>"
+)
 
-def format_to_chat(example: dict, tokenizer) -> str:
-    """把 Alpaca 数据格式化为 Qwen ChatML"""
-    messages = [
-        {"role": "system", "content": SYSTEM_PROMPT},
-        {"role": "user", "content": example["instruction"]},
-        {"role": "assistant", "content": example["output"]},
-    ]
-    # 使用 tokenizer 的 apply_chat_template
-    text = tokenizer.apply_chat_template(
-        messages,
-        tokenize=False,
-        add_generation_prompt=False,
+
+def format_to_chat(example: dict, tokenizer=None) -> str:
+    """把 Alpaca 数据格式化为 Qwen ChatML（手动构造，不依赖 tokenizer.chat_template）"""
+    text = CHATML_TEMPLATE.format(
+        system=SYSTEM_PROMPT,
+        user=example["instruction"],
+        assistant=example["output"],
     )
     return {"text": text}
 
