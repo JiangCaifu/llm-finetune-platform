@@ -183,7 +183,9 @@ def main():
 
     # ===== 5. 训练配置 =====
     print("\n[5/6] 配置训练参数...")
-    training_args = TrainingArguments(
+    # trl 0.22+ 的 SFTConfig 继承自 TrainingArguments，所有参数都直接在 SFTConfig 里设置
+    # 旧版的 max_seq_length 改名为 max_length；不再需要单独的 TrainingArguments
+    sft_config = SFTConfig(
         output_dir=args.output_dir,
         num_train_epochs=args.epochs,
         per_device_train_batch_size=args.batch_size,
@@ -202,11 +204,9 @@ def main():
         load_best_model_at_end=True,
         metric_for_best_model="eval_loss",
         greater_is_better=False,
-    )
-
-    sft_config = SFTConfig(
+        # SFT 专属参数（trl 0.22+ 新 API）
         dataset_text_field="text",
-        max_seq_length=args.max_seq_length,
+        max_length=args.max_seq_length,
         packing=False,
     )
 
@@ -214,11 +214,10 @@ def main():
     print("\n[6/6] 开始训练...")
     trainer = SFTTrainer(
         model=model,
-        args=training_args,
+        args=sft_config,
         train_dataset=train_ds,
         eval_dataset=val_ds,
         processing_class=tokenizer,
-        **sft_config.to_dict(),
     )
 
     # 打印显存
