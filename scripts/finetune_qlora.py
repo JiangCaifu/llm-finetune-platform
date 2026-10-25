@@ -1,6 +1,6 @@
 """
-QLoRA 微调脚本（在 AutoDL GPU 实例上运行）
-============================================
+QLoRA 微调脚本（在阿里云 DSW / AutoDL GPU 实例上运行）
+======================================================
 
 功能：
   1. 加载 Qwen-7B-Chat 基座（4bit 量化）
@@ -10,10 +10,11 @@ QLoRA 微调脚本（在 AutoDL GPU 实例上运行）
   5. 保存 LoRA 权重
 
 前置条件：
-  1. AutoDL 实例：RTX 3090 (24GB) 或 A10 (24GB)
-  2. 镜像：PyTorch 2.1 + CUDA 11.8
+  1. GPU 实例：RTX 3090 (24GB) 或 A10 (24GB)
+  2. 镜像：PyTorch 2.3 + CUDA 12.1 + Python 3.11
   3. 安装依赖：pip install -r requirements-gpu.txt
-  4. 数据集已上传到 ~/llm-finetune-platform/data/
+  4. 数据集已上传到 data/ 目录
+  5. Qwen-7B-Chat 模型已下载到本地
 
 运行：
   cd ~/llm-finetune-platform
@@ -21,8 +22,8 @@ QLoRA 微调脚本（在 AutoDL GPU 实例上运行）
   python scripts/finetune_qlora.py --epochs 5  # 调整 epoch
   python scripts/finetune_qlora.py --rank 16   # 调整 LoRA rank
 
-预计耗时（RTX 3090）：
-  - 700条数据，3个epoch，约 30-60 分钟
+预计耗时（A10 GPU）：
+  - 560条训练数据，3个epoch，约 30-50 分钟
   - 显存占用 ~16GB（4bit + LoRA + batch=4 + 梯度累积=4）
 
 输出：
@@ -41,7 +42,6 @@ import torch
 from transformers import (
     AutoModelForCausalLM,
     AutoTokenizer,
-    TrainingArguments,
 )
 from peft import (
     LoraConfig,
@@ -83,7 +83,7 @@ def load_dataset_split(tokenizer, data_dir: str = "data"):
         raise FileNotFoundError(
             f"训练集不存在: {train_path}\n"
             f"请先在本地运行 scripts/clean_data.py 生成数据集，"
-            f"然后上传 data/ 目录到 AutoDL"
+            f"然后上传 data/ 目录到 GPU 实例"
         )
 
     with open(train_path, "r", encoding="utf-8") as f:
@@ -93,17 +93,48 @@ def load_dataset_split(tokenizer, data_dir: str = "data"):
 
     train_ds = Dataset.from_list(train_data).map(
         lambda x: format_to_chat(x, tokenizer),
-        remove_columns=train_data[0].keys() if train_data else ["instruction", "input", "output"],
+        remove_columns=list(train_data[0].keys()) if train_data else ["instruction", "input", "output"],
     )
     val_ds = Dataset.from_list(val_data).map(
         lambda x: format_to_chat(x, tokenizer),
-        remove_columns=val_data[0].keys() if val_data else ["instruction", "input", "output"],
+        remove_columns=list(val_data[0].keys()) if val_data else ["instruction", "input", "output"],
     )
 
     print(f"训练集: {len(train_ds)} 条")
     print(f"验证集: {len(val_ds)} 条")
 
     return train_ds, val_ds
+
+
+def setup_pad_token(tokenizer):
+    """
+    为 Qwen-7B-Chat 旧版 tokenizer 设置 pad_token。
+    不能依赖 tokenizer.eos_token（trl 0.22 内部 convert_tokens_to_ids(pad_token) 会传 None 报错）。
+    优先用 eos_token，其次 unk_token，最后抛错。
+    """
+    if tokenizer.pad_token is not None:
+        return
+
+    # 优先尝试 eos_token
+    try:
+        eos = tokenizer.eos_token
+        if eos is not None:
+            tokenizer.pad_token = eos
+            return
+    except Exception:
+        pass
+
+    # 退而求其次：用 unk_token
+    try:
+        unk = tokenizer.unk_token
+        if unk is not None:
+            tokenizer.pad_token = unk
+            return
+    except Exception:
+        pass
+
+    # 实在不行就抛错
+    raise RuntimeError("无法为 tokenizer 设置 pad_token，请检查 tokenizer 配置")
 
 
 def main():
@@ -143,9 +174,10 @@ def main():
         trust_remote_code=True,
         padding_side="right",
     )
-    if tokenizer.pad_token is None:
-        tokenizer.pad_token = tokenizer.eos_token
+    # 显式设置 pad_token，避免 trl 0.22 内部传 None 报错
+    setup_pad_token(tokenizer)
     print(f"Tokenizer 加载完成，vocab_size = {len(tokenizer)}")
+    print(f"pad_token = {tokenizer.pad_token!r}, pad_token_id = {tokenizer.pad_token_id}")
 
     # ===== 2. 加载数据 =====
     print("\n[2/6] 加载数据集...")
