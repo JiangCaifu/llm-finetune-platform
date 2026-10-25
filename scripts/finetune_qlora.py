@@ -106,69 +106,84 @@ def load_dataset_split(tokenizer, data_dir: str = "data"):
     return train_ds, val_ds
 
 
-def setup_pad_token(tokenizer):
+def setup_special_tokens(tokenizer):
     """
-    为 Qwen-7B-Chat 旧版 tokenizer 设置 pad_token。
+    为 Qwen-7B-Chat 旧版 tokenizer 一次性补齐所有特殊 token。
 
     背景：
       Qwen-7B-Chat（2023 年初版）的 tokenizer_config.json 仅 174 字节，
-      未显式配置 pad_token/eos_token/unk_token 的字符串映射，
-      导致 tokenizer.pad_token 属性返回 None，
-      trl 0.22 的 SFTTrainer 初始化时调用
-        pad_token_id = tokenizer.convert_tokens_to_ids(pad_token)
-      会传 None 给 tokenization_qwen.py 的 convert_tokens_to_ids，
-      触发 'NoneType' object is not iterable 错误。
+      未显式配置 bos/eos/pad/unk token 的字符串映射，导致这些属性全部返回 None。
+      而 trl 0.22 的 SFTTrainer 内部多处依赖：
+        1. SFTTrainer.__init__ 调 tokenizer.convert_tokens_to_ids(pad_token)  → 需要 pad_token 非 None
+        2. SFTTrainer._add_eos 调 example["text"].endswith(eos_token)          → 需要 eos_token 非 None
+      任一为 None 都会触发 'NoneType' 相关错误。
 
-    工程标准方案（按优先级）：
-      1. 优先从 generation_config 读 pad_token_id（最规范，适配不同模型版本）
+    工程标准方案：
+      1. 优先从 generation_config 读 eos_token_id / pad_token_id（适配不同模型版本）
       2. 配置缺失时用已知常量兜底（Qwen-7B-Chat 的 たくさん token id=151643）
-      3. 同步设置 pad_token 字符串，避免字符串查询返回 None
+      3. 同步设置字符串和 id，保证两者一致
       4. 不新增 token，不 resize embedding，避免与 LoRA 训练冲突
     """
-    if tokenizer.pad_token is not None:
-        return
+    # 已通过 vocab 探查验证：id=151643 对应 Qwen-7B-Chat 的 たくさん token
+    QWEN_EOS_TOKEN_ID = 151643
 
-    # ===== 步骤 1：优先尝试直接用 eos_token（HuggingFace 官方推荐写法）=====
-    try:
-        eos = tokenizer.eos_token
-        if eos is not None:
-            tokenizer.pad_token = eos
-            return
-    except Exception:
-        pass
-
-    # ===== 步骤 2：从 generation_config 读 pad_token_id（最规范的工程做法）=====
-    pad_token_id = None
+    # ===== 步骤 1：从 generation_config 读特殊 token id =====
+    eos_id = None
+    pad_id = None
     try:
         gen_config = getattr(tokenizer, "generation_config", None)
         if gen_config is not None:
-            # 优先用 pad_token_id，其次 eos_token_id（很多模型共用同一个 id）
-            pad_token_id = getattr(gen_config, "pad_token_id", None) or \
-                           getattr(gen_config, "eos_token_id", None)
+            eos_id = getattr(gen_config, "eos_token_id", None)
+            pad_id = getattr(gen_config, "pad_token_id", None)
     except Exception:
         pass
 
-    # ===== 步骤 3：兜底用已知常量（Qwen-7B-Chat 的 たくさん token id）=====
-    # 已通过 vocab 探查验证：id=151643 对应 たくさん token
-    if pad_token_id is None:
-        pad_token_id = 151643  # Qwen-7B-Chat 的 たくさん token id
+    # 兜底：用已知常量
+    if eos_id is None:
+        eos_id = QWEN_EOS_TOKEN_ID
+    if pad_id is None:
+        pad_id = eos_id  # Qwen-7B-Chat 中 pad 和 eos 共用同一个 id
 
-    # ===== 步骤 4：设置 pad_token_id + 同步 pad_token 字符串 =====
-    tokenizer.pad_token_id = pad_token_id
-    # 从 vocab 反查字符串，保证 pad_token 不为 None
-    try:
-        pad_token_str = tokenizer.convert_ids_to_tokens(pad_token_id)
-        if pad_token_str is None:
-            # 兜底：用 decode 拿到字符串
-            pad_token_str = tokenizer.decode([pad_token_id])
-        if pad_token_str is None:
-            # 最后兜底：构造字符串（chr(0x3C) 是 '<'）
-            pad_token_str = chr(0x3C) + "|endoftext|"
-        tokenizer.pad_token = pad_token_str
-    except Exception:
-        tokenizer.pad_token = chr(0x3C) + "|endoftext|"
+    # ===== 步骤 2：从 vocab 反查字符串 =====
+    def _id_to_str(tid):
+        try:
+            s = tokenizer.convert_ids_to_tokens(tid)
+            if s is None:
+                s = tokenizer.decode([tid])
+            return s
+        except Exception:
+            return None
 
-    print(f"  设置 pad_token_id={tokenizer.pad_token_id}, pad_token={tokenizer.pad_token!r}")
+    eos_str = _id_to_str(eos_id) or (chr(0x3C) + "|endoftext|")
+    pad_str = _id_to_str(pad_id) or eos_str
+
+    # ===== 步骤 3：同步设置所有特殊 token（id + 字符串）=====
+    if tokenizer.bos_token is None:
+        tokenizer.bos_token_id = None  # Qwen 没有 bos
+        tokenizer.bos_token = None
+
+    if tokenizer.eos_token is None:
+        tokenizer.eos_token_id = eos_id
+        tokenizer.eos_token = eos_str
+
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token_id = pad_id
+        tokenizer.pad_token = pad_str
+
+    if tokenizer.unk_token is None:
+        # Qwen-7B-Chat 没有 unk，复用 eos
+        tokenizer.unk_token_id = eos_id
+        tokenizer.unk_token = eos_str
+
+    print(f"  bos_token={tokenizer.bos_token!r}, id={tokenizer.bos_token_id}")
+    print(f"  eos_token={tokenizer.eos_token!r}, id={tokenizer.eos_token_id}")
+    print(f"  pad_token={tokenizer.pad_token!r}, id={tokenizer.pad_token_id}")
+    print(f"  unk_token={tokenizer.unk_token!r}, id={tokenizer.unk_token_id}")
+
+
+def setup_pad_token(tokenizer):
+    """兼容旧调用入口（已弃用，请用 setup_special_tokens）"""
+    setup_special_tokens(tokenizer)
 
 
 def main():
