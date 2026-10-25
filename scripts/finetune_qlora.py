@@ -240,7 +240,10 @@ def main():
         load_in_4bit=True,
         device_map="auto",
         trust_remote_code=True,
-        torch_dtype=torch.float16,
+        # 用 bfloat16 加载，匹配 Qwen flash attention 的 dtype assert
+        # Qwen-7B-Chat 的 modeling_qwen.py:183 强制要求 q/k/v ∈ {fp16, bf16}
+        # 若用 fp16 + prepare_model_for_kbit_training 会导致部分层升级到 fp32，触发 assert 失败
+        torch_dtype=torch.bfloat16,
     )
     model = prepare_model_for_kbit_training(model)
     print("基座模型加载完成")
@@ -279,7 +282,11 @@ def main():
         eval_strategy="epoch",
         save_strategy="epoch",
         save_total_limit=3,
-        fp16=True,
+        # 用 bf16 训练，匹配 Qwen-7B-Chat flash attention 的 dtype assert
+        # fp16 训练会让 prepare_model_for_kbit_training 升级后的层变成 fp32，
+        # 导致 q/k/v 是 fp32，触发 modeling_qwen.py:183 的 assert 失败
+        # A10 (Ampere) 原生支持 bf16，性能和 fp16 接近，但数值范围更大（更适合训练）
+        bf16=True,
         optim="paged_adamw_8bit",
         report_to="tensorboard",
         load_best_model_at_end=True,
