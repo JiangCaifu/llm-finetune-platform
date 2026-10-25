@@ -166,13 +166,14 @@ def main():
 
     # ===== 4. 应用 LoRA 配置 =====
     print("\n[4/6] 应用 LoRA 配置...")
+    # Qwen-7B-Chat（2023 初版）使用 GPT 风格命名：
+    #   c_attn = 合并的 QKV 矩阵
+    #   c_proj = attention 输出投影 + MLP 输出投影
+    #   w1, w2 = MLP 上下投影（对应新版的 gate_proj/up_proj）
     lora_config = LoraConfig(
         r=args.rank,
         lora_alpha=args.alpha,
-        target_modules=[
-            "q_proj", "k_proj", "v_proj", "o_proj",  # attention
-            "gate_proj", "up_proj", "down_proj",     # MLP
-        ],
+        target_modules=["c_attn", "c_proj", "w1", "w2"],
         lora_dropout=0.05,
         bias="none",
         task_type=TaskType.CAUSAL_LM,
