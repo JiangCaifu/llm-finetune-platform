@@ -24,7 +24,7 @@ QLoRA 微调脚本（在阿里云 DSW / AutoDL GPU 实例上运行）
 
 预计耗时（A10 GPU）：
   - 560条训练数据，3个epoch，约 30-50 分钟
-  - 显存占用 ~16GB（4bit + LoRA + batch=4 + 梯度累积=4）
+  - 显存占用 ~17GB（bf16 全精度 + LoRA + batch=4 + 梯度累积=4 + 梯度检查点）
 
 输出：
   outputs/qwen-tourism-lora/
@@ -42,12 +42,10 @@ import torch
 from transformers import (
     AutoModelForCausalLM,
     AutoTokenizer,
-    BitsAndBytesConfig,
 )
 from peft import (
     LoraConfig,
     get_peft_model,
-    prepare_model_for_kbit_training,
     TaskType,
 )
 from datasets import Dataset
@@ -153,24 +151,22 @@ def main():
     train_ds, val_ds = load_dataset_split(tokenizer, args.data_dir)
     print(f"数据集加载完成")
 
-    # ===== 3. 加载基座模型（4bit 量化）=====
-    print("\n[3/6] 加载基座模型（4bit 量化）...")
-    # 标准 QLoRA 配置：必须用 BitsAndBytesConfig 显式指定 nf4 + double_quant + compute_dtype
-    # 直接传 load_in_4bit=True 会用默认 fp4 量化且不设 compute_dtype，
-    # 反向传播时梯度会被破坏（grad_norm 全程为 0，模型完全不学习）
-    bnb_config = BitsAndBytesConfig(
-        load_in_4bit=True,
-        bnb_4bit_quant_type="nf4",            # Normalized Float 4-bit（QLoRA 论文标准）
-        bnb_4bit_compute_dtype=torch.bfloat16, # 反向传播时去量化到 bf16，与训练 dtype 一致
-        bnb_4bit_use_double_quant=True,        # 嵌套量化，进一步省显存且不掉精度
-    )
+    # ===== 3. 加载基座模型（bf16 全精度 + 梯度检查点）=====
+    print("\n[3/6] 加载基座模型（bf16 全精度）...")
+    # 放弃 4-bit 量化：在该 bitsandbytes 版本下，4-bit + LoRA + bf16 组合
+    # 反向传播时梯度被破坏（grad_norm 全程为 0，模型完全不学习）。
+    # 改用 bf16 全精度模型 + gradient checkpointing，A10 24GB 显存完全够用
+    # （Qwen2-7B bf16 ~14GB + LoRA + 激活值 + 优化器状态 ~17GB）
     model = AutoModelForCausalLM.from_pretrained(
         args.model,
-        quantization_config=bnb_config,
         device_map="auto",
         torch_dtype=torch.bfloat16,  # A10 (Ampere) 原生支持 bf16
     )
-    model = prepare_model_for_kbit_training(model)
+    # 关闭 KV cache（训练时必须），开启梯度检查点（省显存，只用 1 次前向的显存做反向）
+    model.config.use_cache = False
+    model.gradient_checkpointing_enable()
+    # 让输入张量要求梯度，保证 LoRA + gradient_checkpointing 下梯度能正确回传
+    model.enable_input_require_grads()
     print("基座模型加载完成")
 
     # ===== 4. 应用 LoRA 配置 =====
@@ -211,6 +207,8 @@ def main():
         save_total_limit=3,
         bf16=True,  # A10 (Ampere) 原生支持 bf16，比 fp16 数值范围更大、训练更稳定
         optim="adamw_torch",  # 标准 PyTorch AdamW（A10 24GB 显存充足，无需 paged 8bit）
+        gradient_checkpointing=True,  # 启用梯度检查点，省显存（已配合 model.gradient_checkpointing_enable）
+        gradient_checkpointing_kwargs={"use_reentrant": False},  # PyTorch 2.x 推荐的非可重入实现
         report_to="tensorboard",
         load_best_model_at_end=True,
         metric_for_best_model="eval_loss",
