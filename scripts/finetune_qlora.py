@@ -164,8 +164,13 @@ def main():
     )
     # 关闭 KV cache（训练时必须），开启梯度检查点（省显存，只用 1 次前向的显存做反向）
     model.config.use_cache = False
-    model.gradient_checkpointing_enable()
-    # 让输入张量要求梯度，保证 LoRA + gradient_checkpointing 下梯度能正确回传
+    # use_reentrant=False 是关键：旧 reentrant 模式在 LoRA（冻结 base）下
+    # 因 embedding 输出 require_grad=False 而不建反向图，导致 grad_norm=0
+    # 详见 docs/troubleshooting-grad-norm-zero.md
+    model.gradient_checkpointing_enable(
+        gradient_checkpointing_kwargs={"use_reentrant": False}
+    )
+    # 让 embedding 输出 require grad，保证 LoRA + gradient_checkpointing 下梯度能正确回传
     model.enable_input_require_grads()
     print("基座模型加载完成")
 
