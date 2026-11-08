@@ -1,0 +1,53 @@
+# ============================================================
+# docker-compose.yml：文旅问答服务
+# ============================================================
+# 使用方式：
+#   1. GPU 部署（默认）：docker compose up -d
+#   2. 查看日志：docker compose logs -f
+#   3. 停止：docker compose down
+# ============================================================
+
+services:
+  tourism-llm:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: tourism-llm:latest
+    container_name: tourism-llm
+
+    # GPU 支持（需要 NVIDIA Container Toolkit）
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+    # 端口映射
+    ports:
+      - "8000:8000"
+
+    # 环境变量（覆盖 Dockerfile 默认值）
+    environment:
+      - BASE_MODEL_PATH=${BASE_MODEL_PATH:-/models/Qwen2-7B-Instruct}
+      - LORA_PATH=/app/outputs/qwen-tourism-lora
+      - HOST=0.0.0.0
+      - PORT=8000
+
+    # 模型目录挂载（基座模型在宿主机，不打入镜像）
+    volumes:
+      # 基座模型目录（按实际路径修改）
+      - ${MODEL_HOST_PATH:-/mnt/workspace/models/models/qwen--Qwen2-7B-Instruct/snapshots/master}:/models/Qwen2-7B-Instruct:ro
+      # LoRA 权重（训练产物）
+      - ./outputs/qwen-tourism-lora:/app/outputs/qwen-tourism-lora:ro
+
+    # 重启策略
+    restart: unless-stopped
+
+    # 日志限制
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
