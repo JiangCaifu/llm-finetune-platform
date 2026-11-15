@@ -6,7 +6,8 @@
  * - Mock 模式：VITE_MOCK=true，返回假数据，不需要后端
  */
 
-const API_BASE = import.meta.env.VITE_API_BASE || ''
+// 默认用相对路径（'.'），兼容部署在根路径和 DSW 的 /proxy/8000/ 子路径
+const API_BASE = import.meta.env.VITE_API_BASE || '.'
 const USE_MOCK = import.meta.env.VITE_MOCK === 'true'
 
 export interface ChatResponse {
