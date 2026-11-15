@@ -151,7 +151,7 @@ docker run --rm tourism-llm:latest python -c \
    print('peft', peft.__version__); \
    print('accelerate', accelerate.__version__); \
    print('numpy', numpy.__version__)"
-# 期望：transformers 4.55.x / peft 0.18.x / accelerate 0.3x.x / numpy 1.x
+# 期望：transformers 4.55.4 / peft 0.18.x / accelerate 0.34.x / numpy 1.x
 # 若 transformers 是 5.x → LoRA 适配代码里的 torch_dtype 会直接报错
 # 若 numpy 是 2.x → import torch 时 ABI 冲突（Failed to initialize NumPy）
 

@@ -10,9 +10,10 @@ pydantic>=2.6.0
 # 版本必须与训练环境对齐（见 outputs/qwen-tourism-lora/README.md 的 Framework versions：
 #   Transformers 4.55.4 / PEFT 0.18.1 / Tokenizers 0.21.4 / Pytorch 2.3.1）
 # 上界不能放开：
+#   - transformers 上界收到训练时的精确小版本，避免装到未经验证的新版本
 #   - transformers 5.x 移除了 torch_dtype（改名 dtype）、TF/Flax 后端，适配代码会直接报错
 #   - numpy 2.x 与按 numpy 1.x 编译的 torch 2.3.1 wheel ABI 不兼容
-transformers>=4.55.4,<5.0.0
+transformers>=4.55.4,<4.56.0
 peft>=0.18.1,<0.19.0
 accelerate>=0.34.0,<1.0.0
 numpy<2.0.0
