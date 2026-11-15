@@ -78,6 +78,7 @@ curl http://localhost:8000/api/v1/health
 - 需要单独下载 Qwen2-7B-Instruct 基座模型
 - GPU 显存要求：16GB+ (bf16 推理)
 - 此权重仅用于文旅问答场景，不保证其他领域效果
+- 推理服务代码与 Docker 镜像构建已验证，但完整的「加载模型 + 返回回答」链路尚未在 GPU 上实测；首次部署请以 `/api/v1/health` 返回 `model_loaded: true` 为准（详见 [部署指南的验证状态](deployment.md#4-本项目的实际验证状态)）
 ```
 
 ---

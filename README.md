@@ -101,7 +101,7 @@ curl http://localhost:8000/api/v1/health
 
 浏览器访问 `http://localhost:8000` 即可使用文旅问答服务。
 
-> 无 GPU 机器上用 `docker compose up -d`（基础配置，不声明 GPU 设备）。三种运行环境的取舍见 [部署指南](docs/deployment.md)。
+> 无 GPU 机器上用 `docker compose up -d`（基础配置，不声明 GPU 设备）。三种运行环境的取舍见 [部署指南](docs/deployment.md)，各验证项的实测状态见[验证状态](docs/deployment.md#4-本项目的实际验证状态)。
 
 ### 3. 开发模式
 
