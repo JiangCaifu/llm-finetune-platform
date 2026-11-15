@@ -144,8 +144,16 @@ docker run --rm tourism-llm:latest python -c "import torch; print(torch.__versio
 # 期望：2.3.1+cu121 / 12.1
 # 若输出 2.3.1（无后缀），说明装成了 CPU wheel，镜像不可用于 GPU 推理
 
-# accelerate 依赖（device_map="auto" 需要）
-docker run --rm tourism-llm:latest python -c "import accelerate; print(accelerate.__version__)"
+# 推理依赖版本必须与训练环境一致（上界已由 requirements-api.txt 钉死）
+docker run --rm tourism-llm:latest python -c \
+  "import transformers, peft, accelerate, numpy; \
+   print('transformers', transformers.__version__); \
+   print('peft', peft.__version__); \
+   print('accelerate', accelerate.__version__); \
+   print('numpy', numpy.__version__)"
+# 期望：transformers 4.55.x / peft 0.18.x / accelerate 0.3x.x / numpy 1.x
+# 若 transformers 是 5.x → LoRA 适配代码里的 torch_dtype 会直接报错
+# 若 numpy 是 2.x → import torch 时 ABI 冲突（Failed to initialize NumPy）
 
 # 前端产物与后端代码应已就位
 docker run --rm tourism-llm:latest ls /app/frontend/dist/ /app/app/
