@@ -1,10 +1,14 @@
 # ============================================================
-# docker-compose.yml：文旅问答服务
+# docker-compose.yml：文旅问答服务（基础编排，CPU 兼容）
 # ============================================================
-# 使用方式：
-#   1. GPU 部署（默认）：docker compose up -d
-#   2. 查看日志：docker compose logs -f
-#   3. 停止：docker compose down
+# GPU 部署（生产环境）：
+#   docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d
+#
+# 无 GPU 环境（仅构建验证 / CPU 推理）：
+#   docker compose up -d
+#
+# 本文件刻意不声明 GPU 设备，这样在未安装 NVIDIA Container Toolkit
+# 的机器上也能启动（不会报 "could not select device driver"）。
 # ============================================================
 
 services:
@@ -14,15 +18,6 @@ services:
       dockerfile: Dockerfile
     image: tourism-llm:latest
     container_name: tourism-llm
-
-    # GPU 支持（需要 NVIDIA Container Toolkit）
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
 
     # 端口映射
     ports:
@@ -38,7 +33,7 @@ services:
     # 模型目录挂载（基座模型在宿主机，不打入镜像）
     volumes:
       # 基座模型目录（按实际路径修改）
-      - ${MODEL_HOST_PATH:-/mnt/workspace/models/models/qwen--Qwen2-7B-Instruct/snapshots/master}:/models/Qwen2-7B-Instruct:ro
+      - ${MODEL_HOST_PATH:-/models/Qwen2-7B-Instruct}:/models/Qwen2-7B-Instruct:ro
       # LoRA 权重（训练产物）
       - ./outputs/qwen-tourism-lora:/app/outputs/qwen-tourism-lora:ro
 

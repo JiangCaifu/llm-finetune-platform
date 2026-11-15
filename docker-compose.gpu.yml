@@ -1,0 +1,24 @@
+# ============================================================
+# docker-compose.gpu.yml：GPU 设备声明（叠加在基础编排之上）
+# ============================================================
+# 用法：
+#   docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d
+#
+# 前置条件（宿主机）：
+#   1. NVIDIA 驱动（nvidia-smi 可用）
+#   2. NVIDIA Container Toolkit
+#      https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html
+#
+# 未安装 Toolkit 时启动会报错：
+#   could not select device driver "" with capabilities: [[gpu]]
+# ============================================================
+
+services:
+  tourism-llm:
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
