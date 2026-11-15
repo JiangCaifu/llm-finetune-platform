@@ -64,10 +64,12 @@ llm-finetune-platform/
 │   └── tourism_test.json       # 70 条测试数据
 ├── docs/                       # 文档
 │   ├── project-plan.md         # 项目计划
-│   ├── deployment.md           # Docker 部署指南
+│   ├── deployment.md           # 部署指南
+│   ├── release-guide.md        # 权重发布流程
 │   └── troubleshooting-grad-norm-zero.md  # 训练踩坑记录
 ├── Dockerfile                  # 多阶段构建
-├── docker-compose.yml          # GPU 部署编排
+├── docker-compose.yml          # 基础编排（CPU 兼容）
+├── docker-compose.gpu.yml      # GPU 设备声明（叠加使用）
 └── requirements-api.txt        # Python 依赖
 ```
 
@@ -90,14 +92,16 @@ cd llm-finetune-platform
 # 设置基座模型路径
 export MODEL_HOST_PATH=/path/to/Qwen2-7B-Instruct
 
-# 启动
-docker compose up -d
+# 启动（叠加 GPU 配置）
+docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d
 
 # 验证
 curl http://localhost:8000/api/v1/health
 ```
 
 浏览器访问 `http://localhost:8000` 即可使用文旅问答服务。
+
+> 无 GPU 机器上用 `docker compose up -d`（基础配置，不声明 GPU 设备）。三种运行环境的取舍见 [部署指南](docs/deployment.md)。
 
 ### 3. 开发模式
 
@@ -162,7 +166,8 @@ FastAPI 同时 serve API 和前端静态文件，单端口部署，无跨域问�
 ## 文档
 
 - [项目计划](docs/project-plan.md) - 8 周开发计划与技术栈选型
-- [Docker 部署指南](docs/deployment.md) - GPU/CPU 部署方式
+- [Docker 部署指南](docs/deployment.md) - 三种运行环境的部署形态与构建验证
+- [权重发布流程](docs/release-guide.md) - LoRA 权重打包、校验与 GitHub Release 发布
 - [训练踩坑记录](docs/troubleshooting-grad-norm-zero.md) - grad_norm=0 根因分析与修复
 - [AutoDL/DSW 配置](docs/autodl-setup.md) - GPU 环境搭建指南
 

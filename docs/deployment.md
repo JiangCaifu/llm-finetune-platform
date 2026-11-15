@@ -1,12 +1,39 @@
 # Docker 部署指南
 
+## 部署形态选择
+
+本项目支持三种运行环境，用途不同，不要混用：
+
+| 环境 | 形态 | 用途 | 理由 |
+|------|------|------|------|
+| PAI-DSW / AutoDL 等托管 GPU 平台 | **裸机**（venv + uvicorn） | 训练、推理验证 | 平台实例内部无 docker daemon，不支持嵌套 Docker |
+| 自有 GPU 服务器 | **Docker** | 标准交付形态 | 环境一致，一次构建到处运行；模型通过卷挂载，不入镜像 |
+| 普通 CPU 服务器 / CI | **仅构建验证** | 验证 Dockerfile 可用性 | 无需 GPU 即可完成镜像构建与依赖校验 |
+
+裸机启动方式见 [裸机部署](#五裸机部署训练平台)。
+
+---
+
 ## 前置条件
+
+### 硬件要求
+
+| 场景 | 资源 | 说明 |
+|------|------|------|
+| GPU 推理 | 显存 **16GB+** | Qwen2-7B-Instruct bf16 权重约 15GB，推理需额外 KV cache 空间 |
+| CPU 推理 | 内存 **18GB+** | 权重以 bf16 常驻内存，另需运行时开销；速度慢，仅供调试 |
+| 镜像构建 | 磁盘 **25GB+** | 基础镜像约 2.3GB + torch cu121 约 4.5GB + 构建缓存 |
+
+> 显存与内存不可互换。GPU 机器上模型占用的是显存，CPU 机器上占用的是内存，两者都需要 16GB 以上才能装下 7B 模型。
+
+### 软件要求
 
 | 依赖 | 版本要求 | 说明 |
 |------|---------|------|
 | Docker | 20.10+ | [安装指南](https://docs.docker.com/get-docker/) |
-| NVIDIA Container Toolkit | 最新 | GPU 部署需要，[安装指南](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html) |
-| GPU 显存 | 16GB+ | Qwen2-7B-Instruct bf16 推理约 14GB |
+| Docker Compose | v2.20+ | GPU 部署使用 `docker compose -f` 叠加配置 |
+| NVIDIA Container Toolkit | 最新 | 仅 GPU 部署需要，[安装指南](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html) |
+| NVIDIA 驱动 | 支持 CUDA 12.1 | 仅 GPU 部署需要，`nvidia-smi` 可验证 |
 
 ---
 
@@ -14,93 +41,174 @@
 
 ```
 llm-finetune-platform/
-├── Dockerfile              # 多阶段构建：前端 + 后端
-├── docker-compose.yml      # GPU 部署编排
-├── .dockerignore           # 排除大文件
-├── app/                    # FastAPI 后端
-├── frontend/               # React 前端源码
-├── scripts/                # 训练/评测脚本
-├── outputs/                # LoRA 权重（训练产物，挂载进容器）
-└── requirements-api.txt    # Python 依赖
+├── Dockerfile                # 多阶段构建：前端 + 后端
+├── docker-compose.yml        # 基础编排（CPU 兼容）
+├── docker-compose.gpu.yml    # GPU 设备声明（叠加使用）
+├── .dockerignore            # 排除大文件
+├── app/                      # FastAPI 后端
+├── frontend/                 # React 前端源码
+├── scripts/                  # 训练/评测脚本
+├── outputs/                  # LoRA 权重（训练产物，挂载进容器）
+└── requirements-api.txt      # Python 依赖
 ```
 
 ---
 
-## 快速部署（GPU）
+## 一、准备模型和权重
 
-### 1. 准备模型和权重
-
-确保以下两个目录存在：
+模型与代码分离：基座模型和 LoRA 权重都通过卷挂载进容器，不打进镜像。
 
 ```bash
 # 基座模型（Qwen2-7B-Instruct）
-ls /mnt/workspace/models/models/qwen--Qwen2-7B-Instruct/snapshots/master/
+ls /path/to/Qwen2-7B-Instruct/
 # 应包含：config.json, model-*.safetensors, tokenizer.json 等
 
 # LoRA 权重（训练产物）
 ls outputs/qwen-tourism-lora/
-# 应包含：adapter_config.json, adapter_model.safetensors, tokenizer 文件等
+# 应包含：adapter_config.json, adapter_model.safetensors
 ```
 
-### 2. 一键启动
+LoRA 权重的获取与校验见 [release-guide.md](release-guide.md)。
+
+---
+
+## 二、GPU 部署
+
+### 1. 启动
 
 ```bash
-docker compose up -d
+# 指定基座模型在宿主机上的路径
+export MODEL_HOST_PATH=/path/to/Qwen2-7B-Instruct
+
+# 叠加 GPU 配置启动
+docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d
 ```
 
-首次启动会自动构建镜像（约 5-10 分钟），后续启动直接复用缓存。
+首次启动会自动构建镜像，构建完成后立即启动。
 
-### 3. 验证服务
+### 2. 验证服务
 
 ```bash
 # 健康检查
 curl http://localhost:8000/api/v1/health
+# 期望：{"status":"ok","model_loaded":true,"gpu_available":true,"gpu_memory_used_gb":14.26}
 
 # 文旅问答
 curl -X POST http://localhost:8000/api/v1/chat \
   -H "Content-Type: application/json" \
-  -d '{"question": "北京有什么景点？"}'
+  -d '{"question": "北京有什么景点？", "max_new_tokens": 256}'
 
 # 浏览器访问前端
 open http://localhost:8000
 ```
 
-### 4. 查看日志 / 停止
+### 3. 查看日志 / 停止
 
 ```bash
-docker compose logs -f        # 实时日志
-docker compose down           # 停止并清理
-docker compose restart        # 重启
+docker compose -f docker-compose.yml -f docker-compose.gpu.yml logs -f
+docker compose -f docker-compose.yml -f docker-compose.gpu.yml down
 ```
 
 ---
 
-## 自定义配置
+## 三、无 GPU 环境验证构建
 
-### 修改模型路径
+CPU 服务器上不需要模型权重，也能验证 Dockerfile 是否可用。这是 CI 或临时机器上唯一可行的验证方式。
 
-在项目根目录创建 `.env` 文件：
+### 1. 构建镜像
+
+```bash
+git clone https://github.com/JiangCaifu/llm-finetune-platform.git
+cd llm-finetune-platform
+docker build -t tourism-llm:latest .
+```
+
+构建耗时主要在下载依赖（国内网络约 10-30 分钟）：
+
+| 阶段 | 内容 | 体积 |
+|------|------|------|
+| 阶段 1 | `node:20-slim` + npm ci + vite build | 约 400MB（构建层，不进最终镜像） |
+| 阶段 2 | `nvidia/cuda:12.1.0-runtime-ubuntu22.04` + torch cu121 | 约 8GB |
+
+构建完成后清理缓存，回收磁盘：
+
+```bash
+docker system prune -a
+```
+
+### 2. 校验镜像内容
+
+```bash
+# torch 必须是 GPU 版：版本号带 +cu121 后缀
+docker run --rm tourism-llm:latest python -c "import torch; print(torch.__version__); print(torch.version.cuda)"
+# 期望：2.3.1+cu121 / 12.1
+# 若输出 2.3.1（无后缀），说明装成了 CPU wheel，镜像不可用于 GPU 推理
+
+# accelerate 依赖（device_map="auto" 需要）
+docker run --rm tourism-llm:latest python -c "import accelerate; print(accelerate.__version__)"
+
+# 前端产物与后端代码应已就位
+docker run --rm tourism-llm:latest ls /app/frontend/dist/ /app/app/
+```
+
+### 3. 启动容器（预期失败）
+
+CPU 机器内存不足时容器无法加载 7B 模型，日志会出现 OOM 或模型路径缺失：
+
+```bash
+docker run -d --name tourism-test -p 8000:8000 \
+  -v /path/to/Qwen2-7B-Instruct:/models/Qwen2-7B-Instruct:ro \
+  -v $PWD/outputs/qwen-tourism-lora:/app/outputs/qwen-tourism-lora:ro \
+  tourism-llm:latest
+
+docker logs -f tourism-test
+```
+
+这是预期行为，不代表部署有误。**完整的推理验证需要 GPU 环境。**
+
+---
+
+## 四、配置项
+
+### 环境变量
+
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| `MODEL_HOST_PATH` | `/models/Qwen2-7B-Instruct` | 宿主机上的基座模型目录 |
+| `BASE_MODEL_PATH` | `/models/Qwen2-7B-Instruct` | 容器内的基座模型路径 |
+| `LORA_PATH` | `/app/outputs/qwen-tourism-lora` | 容器内的 LoRA 权重路径 |
+
+也可以在项目根目录创建 `.env` 文件统一管理：
 
 ```env
 MODEL_HOST_PATH=/your/model/path
 BASE_MODEL_PATH=/models/Qwen2-7B-Instruct
 ```
 
-或直接在 `docker-compose.yml` 的 `volumes` 中修改挂载路径。
+---
 
-### CPU 模式（仅供调试，速度很慢）
+## 五、裸机部署（训练平台）
 
-修改 `docker-compose.yml`，注释掉 `deploy` 段：
+PAI-DSW、AutoDL 等托管平台的实例内部没有 docker daemon，无法在容器里再跑容器。这类环境用裸机方式运行。
 
-```yaml
-    # deploy:
-    #   resources:
-    #     reservations:
-    #       devices:
-    #         - driver: nvidia
-    #           count: 1
-    #           capabilities: [gpu]
+```bash
+# 1. 安装依赖
+pip install -r requirements-api.txt
+
+# 2. 启动服务
+uvicorn app.main:app --host 0.0.0.0 --port 8000
+
+# 3. 验证
+curl http://localhost:8000/api/v1/health
 ```
+
+前端需要单独构建并由 FastAPI 一并 serve：
+
+```bash
+cd frontend && npm install && npm run build && cd ..
+```
+
+裸机与 Docker 的区别只在于依赖装在哪、进程怎么起，代码路径完全一致。
 
 ---
 
@@ -109,13 +217,24 @@ BASE_MODEL_PATH=/models/Qwen2-7B-Instruct
 ### 多阶段构建
 
 ```
-阶段 1: node:20-slim     → npm ci → npm run build → frontend/dist/
-阶段 2: nvidia/cuda:12.1 → pip install → copy app + frontend/dist
+阶段 1: node:20-slim                → npm ci → npm run build → frontend/dist/
+阶段 2: nvidia/cuda:12.1.0-runtime  → pip install → copy app + frontend/dist
 ```
 
 **为什么多阶段？**
 - 前端构建工具（Node、npm、TypeScript）不进入最终镜像，减小镜像体积
 - 最终镜像只包含运行时必需的 Python + 编译好的静态文件
+
+### 依赖来源
+
+torch 必须从 PyTorch 官方索引安装：
+
+```dockerfile
+RUN pip3 install --no-cache-dir torch==2.3.1 \
+    --index-url https://download.pytorch.org/whl/cu121
+```
+
+第三方镜像源同步的是默认 PyPI 版本，不带 `+cu121` 后缀，装出来是 CPU wheel，容器内即使有 GPU 也无法使用。其余依赖走清华源加速。
 
 ### 镜像分层缓存
 
@@ -123,8 +242,16 @@ Dockerfile 先复制 `package.json` 和 `requirements-api.txt`，再复制源码
 
 ### 模型不入镜像
 
-Qwen2-7B 基座模型约 14GB，LoRA 权重约 80MB。如果把模型打入镜像：
-- 镜像体积 14GB+，推拉极慢
+Qwen2-7B 基座模型约 15GB，LoRA 权重约 80MB。如果把模型打入镜像：
+- 镜像体积 15GB+，推拉极慢
 - 每次模型更新都要重新 build
 
 因此模型通过 `volumes` 挂载进容器，镜像只包含代码和依赖。
+
+### 健康检查
+
+```dockerfile
+HEALTHCHECK --interval=30s --timeout=10s --start-period=180s --retries=3
+```
+
+`start-period` 给到 180 秒，因为 7B 模型加载需要 1-2 分钟，过短会让容器在模型就绪前就被判定为 `unhealthy`。

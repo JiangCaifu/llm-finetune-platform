@@ -56,7 +56,7 @@ LoRA 权重只是「差量」，必须配合基座模型使用。下载 Qwen2-7B
 # 若基座模型不在默认位置，先指定路径
 export BASE_MODEL_PATH=/path/to/models/Qwen2-7B-Instruct
 
-docker compose up -d
+docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d
 curl http://localhost:8000/api/v1/health
 ```
 
@@ -163,7 +163,7 @@ tar xzf qwen-tourism-lora-min.tar.gz -C C:\Users\zhaoxi\Projects\llm-finetune-pl
 1. 从 Release 下载文件放入 `outputs/qwen-tourism-lora/`
 2. 启动服务（本地 GPU 环境）
    ```bash
-   docker compose up -d
+   docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d
    curl http://localhost:8000/api/v1/health
    ```
 3. 确认 `model_loaded: true` 且 `/api/v1/chat` 返回文旅领域答案
