@@ -130,11 +130,13 @@ docker build -t tourism-llm:latest .
 | 阶段 1 | `node:20-slim` + npm ci + vite build | 约 400MB（构建层，不进最终镜像） |
 | 阶段 2 | `nvidia/cuda:12.1.0-runtime-ubuntu22.04` + torch cu121 | 约 8GB |
 
-构建完成后清理缓存，回收磁盘：
+构建完成后清理构建缓存，回收磁盘：
 
 ```bash
-docker system prune -a
+docker builder prune -f
 ```
+
+注意不要用 `docker system prune -a`：它会连没有容器引用的**镜像本身**一起删掉（此时 `tourism-llm:latest` 还没被任何容器使用，会被误删）。
 
 ### 2. 校验镜像内容
 
